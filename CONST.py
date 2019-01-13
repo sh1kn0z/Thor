@@ -1,4 +1,3 @@
-
 COMMANDS = {
     'help': 'Show this help menu.',
     'clients': 'List connected clients.',
@@ -9,7 +8,7 @@ COMMANDS = {
 
 NUM_OF_THREADS = 2
 
-
+NUM_OF_JOBS = [1, 2]
 
 SERVER_IP = ''
 SERVER_PORT = 80
